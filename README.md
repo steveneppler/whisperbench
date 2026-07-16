@@ -9,15 +9,38 @@ It reports model load time, per-run wall time, real-time factor (RTF), peak
 RSS, and system info (CPU/GPU/RAM), and can optionally dump everything to
 JSON for diffing between systems.
 
-## Requirements
+## Setup
 
+Requires Python 3.9+. Since installing packages into your system Python
+usually isn't possible (or advisable) without admin/root access, set up a
+virtual environment instead:
+
+**macOS / Linux**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install faster-whisper psutil
 ```
+
+**Windows (PowerShell)**
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install --upgrade pip
 pip install faster-whisper psutil
 ```
 
 `psutil` isn't strictly required by the script itself but is commonly needed
 by `faster-whisper`/`ctranslate2` on some platforms, so it's installed
 alongside it.
+
+Once the venv is active, `python`/`pip` point at the venv's copies, so the
+`python whisper_benchmark.py ...` commands below work as-is. When you're
+done, run `deactivate` to leave the venv. You'll need to re-run the
+`activate` step (not the install step) each time you open a new shell.
 
 ## Usage
 
