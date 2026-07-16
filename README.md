@@ -1,0 +1,70 @@
+# whisperbench
+
+A small benchmark script for [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+that mirrors the transcription settings used by our scanner call-transcription
+script, so results can be compared apples-to-apples across different machines
+(Apple Silicon, x86 CPU, GPU boxes, etc.).
+
+It reports model load time, per-run wall time, real-time factor (RTF), peak
+RSS, and system info (CPU/GPU/RAM), and can optionally dump everything to
+JSON for diffing between systems.
+
+## Requirements
+
+```
+pip install faster-whisper psutil
+```
+
+`psutil` isn't strictly required by the script itself but is commonly needed
+by `faster-whisper`/`ctranslate2` on some platforms, so it's installed
+alongside it.
+
+## Usage
+
+```bash
+# Downloads a ~33s public-domain sample clip (JFK) and benchmarks it
+python whisper_benchmark.py
+
+# Benchmark against a real scanner clip instead of the sample.
+# Use the *same* file across machines so results are comparable.
+python whisper_benchmark.py --audio ./some_call.m4a
+
+# GPU box
+python whisper_benchmark.py --device cuda --compute-type float16
+
+# Larger model, more runs
+python whisper_benchmark.py --model large-v3 --runs 5
+
+# Write results to JSON for later comparison
+python whisper_benchmark.py --json results.json
+```
+
+### Key flags
+
+| Flag | Description |
+| --- | --- |
+| `--audio PATH` | Path to audio file. Defaults to downloading a public-domain ~33s JFK speech sample. Use the same file across machines for a representative comparison. |
+| `--device {cpu,cuda,auto}` | Inference device. Default `cpu`. |
+| `--compute-type` | CTranslate2 compute type, e.g. `int8`, `int8_float16`, `float16`, `float32`. Default `int8`. |
+| `--cpu-threads N` | Pin CPU thread count. CTranslate2's default thread count can differ across systems, so set this explicitly for a fair comparison. `0` (default) uses the library default. |
+| `--model NAME` | Whisper model size/name, e.g. `large-v3`, `medium`, `small`. Default `large-v3` (matches the scanner script). |
+| `--beam-size N` | Beam search width. Default `10` (matches the scanner script). |
+| `--runs N` | Number of timed runs after warmup. Default `3`. |
+| `--no-vad` | Disable voice activity detection filtering. |
+| `--json PATH` | Write full results (including system info) to a JSON file. |
+
+## Output
+
+The script prints:
+
+- System info (OS, CPU, RAM, GPU if available, `faster-whisper` version)
+- Model load time
+- A warmup run (excluded from timing stats, since first-run overhead
+  distorts steady-state numbers)
+- Per-run wall time, RTF, and x-realtime speed
+- Summary: mean/median/stdev, RTF, x-realtime speed, peak RSS, and a
+  transcript preview
+
+When `--json` is passed, the same data is written as JSON so you can diff
+results between systems (e.g. Apple Silicon `cpu`/`int8` vs. a GPU box with
+`cuda`/`float16`).
