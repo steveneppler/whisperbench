@@ -62,6 +62,7 @@ def resolve_mlx_model(name):
             f"repo path (e.g. mlx-community/whisper-large-v3-mlx)."
         ) from None
 
+
 # Public domain speech sample (~33s) used when no --audio is given
 SAMPLE_URL = "https://github.com/SYSTRAN/faster-whisper/raw/master/tests/data/jfk.flac"
 SAMPLE_PATH = Path("bench_sample.flac")
@@ -187,7 +188,11 @@ def setup_mlx(args, audio):
         sys.exit(str(e))
 
     from mlx_whisper.audio import SAMPLE_RATE, load_audio
-    duration = len(load_audio(str(audio))) / SAMPLE_RATE
+    try:
+        duration = len(load_audio(str(audio))) / SAMPLE_RATE
+    except Exception as e:
+        sys.exit(f"mlx audio loading failed ({e}). Is ffmpeg installed? "
+                  f"Try: brew install ffmpeg")
 
     t0 = time.perf_counter()
     try:
