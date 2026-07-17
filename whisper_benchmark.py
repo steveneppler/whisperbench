@@ -9,6 +9,7 @@ Usage:
     python whisper_benchmark.py --audio ./clip.m4a    # use your own audio
     python whisper_benchmark.py --device cuda --compute-type float16
     python whisper_benchmark.py --model large-v3 --runs 5
+    python whisper_benchmark.py --backend mlx            # Apple Silicon GPU (Metal)
 
 Reports: model load time, per-run wall time, real-time factor (RTF),
 peak RSS, and system info.
@@ -161,8 +162,68 @@ def setup_faster_whisper(args, audio):
     return transcribe, load_time, desc
 
 
+def setup_mlx(args, audio):
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
+        sys.exit("--backend mlx requires an Apple Silicon Mac (mlx runs on Metal).")
+    try:
+        import mlx_whisper
+    except ImportError:
+        sys.exit("mlx-whisper is not installed. Run: pip install mlx-whisper")
+
+    ignored = [
+        ("--device", args.device != "cpu"),
+        ("--compute-type", args.compute_type != "int8"),
+        ("--cpu-threads", args.cpu_threads != 0),
+        ("--beam-size", args.beam_size != DEFAULT_BEAM_SIZE),
+        ("--no-vad", args.no_vad),
+    ]
+    for flag, is_set in ignored:
+        if is_set:
+            print(f"warning: {flag} is ignored with --backend mlx")
+
+    try:
+        repo = resolve_mlx_model(args.model)
+    except ValueError as e:
+        sys.exit(str(e))
+
+    from mlx_whisper.audio import SAMPLE_RATE, load_audio
+    duration = len(load_audio(str(audio))) / SAMPLE_RATE
+
+    t0 = time.perf_counter()
+    try:
+        import mlx.core as mx
+        from mlx_whisper.transcribe import ModelHolder
+
+        ModelHolder.get_model(repo, mx.float16)
+        load_time = time.perf_counter() - t0
+    except Exception:
+        # Preloading uses mlx-whisper internals; if they change, fall back to
+        # counting the load inside the warmup run.
+        load_time = None
+        print("note: could not preload mlx model; load time will be included "
+              "in the warmup run")
+
+    def transcribe():
+        result = mlx_whisper.transcribe(
+            str(audio),
+            path_or_hf_repo=repo,
+            language="en",
+            initial_prompt=DEFAULT_PROMPT,
+        )
+        return result["text"].strip(), duration
+
+    print("note: mlx backend uses greedy decoding (no beam search) and no VAD "
+          "-- not settings-identical to the faster-whisper baseline")
+    desc = f"{repo} / mlx (metal gpu) / float16"
+    return transcribe, load_time, desc
+
+
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument("--backend", default="faster-whisper",
+                   choices=["faster-whisper", "mlx"],
+                   help="Inference engine. 'mlx' = mlx-whisper on Apple Silicon "
+                        "(Metal GPU); greedy decoding, no VAD.")
     p.add_argument("--audio", type=Path, help="Path to audio file (default: download sample)")
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--device", default="cpu", choices=["cpu", "cuda", "auto"])
@@ -185,8 +246,14 @@ def main():
         print(f"{k:20} {v}")
 
     print("\n=== Loading model ===")
-    transcribe, load_time, desc = setup_faster_whisper(args, audio)
-    print(f"{desc} loaded in {load_time:.2f}s")
+    if args.backend == "mlx":
+        transcribe, load_time, desc = setup_mlx(args, audio)
+    else:
+        transcribe, load_time, desc = setup_faster_whisper(args, audio)
+    if load_time is not None:
+        print(f"{desc} loaded in {load_time:.2f}s")
+    else:
+        print(desc)
 
     print("\n=== Warmup ===")
     t0 = time.perf_counter()
@@ -204,17 +271,19 @@ def main():
               f"speed {duration / dt:5.2f}x realtime")
 
     mean = statistics.mean(times)
+    is_mlx = args.backend == "mlx"
     results = {
         "system": info,
+        "backend": args.backend,
         "model": args.model,
-        "device": args.device,
-        "compute_type": args.compute_type,
-        "cpu_threads": args.cpu_threads or "default",
-        "beam_size": args.beam_size,
-        "vad": not args.no_vad,
+        "device": "mlx (metal gpu)" if is_mlx else args.device,
+        "compute_type": "float16" if is_mlx else args.compute_type,
+        "cpu_threads": "n/a" if is_mlx else (args.cpu_threads or "default"),
+        "beam_size": None if is_mlx else args.beam_size,
+        "vad": False if is_mlx else not args.no_vad,
         "audio": str(audio),
         "audio_duration_s": round(duration, 2),
-        "load_time_s": round(load_time, 2),
+        "load_time_s": round(load_time, 2) if load_time is not None else None,
         "runs_s": [round(t, 3) for t in times],
         "mean_s": round(mean, 3),
         "median_s": round(statistics.median(times), 3),
