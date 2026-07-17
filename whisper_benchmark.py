@@ -135,6 +135,32 @@ def fetch_sample():
     return SAMPLE_PATH
 
 
+def setup_faster_whisper(args, audio):
+    from faster_whisper import WhisperModel
+
+    t0 = time.perf_counter()
+    kwargs = dict(device=args.device, compute_type=args.compute_type)
+    if args.cpu_threads:
+        kwargs["cpu_threads"] = args.cpu_threads
+    model = WhisperModel(args.model, **kwargs)
+    load_time = time.perf_counter() - t0
+
+    def transcribe():
+        segments, meta = model.transcribe(
+            str(audio),
+            vad_filter=not args.no_vad,
+            vad_parameters=None if args.no_vad else dict(VAD_PARAMS),
+            beam_size=args.beam_size,
+            language="en",
+            initial_prompt=DEFAULT_PROMPT,
+        )
+        text = " ".join(s.text for s in segments).strip()  # generator, forces work here
+        return text, meta.duration
+
+    desc = f"{args.model} / {args.device} / {args.compute_type}"
+    return transcribe, load_time, desc
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--audio", type=Path, help="Path to audio file (default: download sample)")
@@ -149,8 +175,6 @@ def main():
     p.add_argument("--json", type=Path, help="Write results to a JSON file")
     args = p.parse_args()
 
-    from faster_whisper import WhisperModel
-
     audio = args.audio or fetch_sample()
     if not Path(audio).exists():
         sys.exit(f"Audio file not found: {audio}")
@@ -161,40 +185,23 @@ def main():
         print(f"{k:20} {v}")
 
     print("\n=== Loading model ===")
-    t0 = time.perf_counter()
-    kwargs = dict(device=args.device, compute_type=args.compute_type)
-    if args.cpu_threads:
-        kwargs["cpu_threads"] = args.cpu_threads
-    model = WhisperModel(args.model, **kwargs)
-    load_time = time.perf_counter() - t0
-    print(f"{args.model} / {args.device} / {args.compute_type} loaded in {load_time:.2f}s")
-
-    def transcribe():
-        segments, meta = model.transcribe(
-            str(audio),
-            vad_filter=not args.no_vad,
-            vad_parameters=None if args.no_vad else dict(VAD_PARAMS),
-            beam_size=args.beam_size,
-            language="en",
-            initial_prompt=DEFAULT_PROMPT,
-        )
-        text = " ".join(s.text for s in segments).strip()  # generator, forces work here
-        return text, meta
+    transcribe, load_time, desc = setup_faster_whisper(args, audio)
+    print(f"{desc} loaded in {load_time:.2f}s")
 
     print("\n=== Warmup ===")
     t0 = time.perf_counter()
-    text, meta = transcribe()
-    print(f"warmup: {time.perf_counter() - t0:.2f}s  (audio duration {meta.duration:.1f}s)")
+    text, duration = transcribe()
+    print(f"warmup: {time.perf_counter() - t0:.2f}s  (audio duration {duration:.1f}s)")
 
     print("\n=== Runs ===")
     times = []
     for i in range(1, args.runs + 1):
         t0 = time.perf_counter()
-        text, meta = transcribe()
+        text, duration = transcribe()
         dt = time.perf_counter() - t0
         times.append(dt)
-        print(f"run {i}: {dt:6.2f}s   RTF {dt / meta.duration:5.3f}   "
-              f"speed {meta.duration / dt:5.2f}x realtime")
+        print(f"run {i}: {dt:6.2f}s   RTF {dt / duration:5.3f}   "
+              f"speed {duration / dt:5.2f}x realtime")
 
     mean = statistics.mean(times)
     results = {
@@ -206,14 +213,14 @@ def main():
         "beam_size": args.beam_size,
         "vad": not args.no_vad,
         "audio": str(audio),
-        "audio_duration_s": round(meta.duration, 2),
+        "audio_duration_s": round(duration, 2),
         "load_time_s": round(load_time, 2),
         "runs_s": [round(t, 3) for t in times],
         "mean_s": round(mean, 3),
         "median_s": round(statistics.median(times), 3),
         "stdev_s": round(statistics.stdev(times), 3) if len(times) > 1 else 0.0,
-        "rtf": round(mean / meta.duration, 4),
-        "speed_x_realtime": round(meta.duration / mean, 2),
+        "rtf": round(mean / duration, 4),
+        "speed_x_realtime": round(duration / mean, 2),
         "peak_rss_gb": peak_rss_gb(),
         "transcript": text,
     }
