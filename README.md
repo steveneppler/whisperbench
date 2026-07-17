@@ -4,6 +4,7 @@ A small benchmark script for [faster-whisper](https://github.com/SYSTRAN/faster-
 that mirrors the transcription settings used by our scanner call-transcription
 script, so results can be compared apples-to-apples across different machines
 (Apple Silicon, x86 CPU, GPU boxes, etc.).
+On Apple Silicon it can also benchmark [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) (Metal GPU) for comparison.
 
 It reports model load time, per-run wall time, real-time factor (RTF), peak
 RSS, and system info (CPU/GPU/RAM), and can optionally dump everything to
@@ -23,6 +24,8 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install faster-whisper psutil
 ```
+
+On Apple Silicon, additionally `pip install mlx-whisper` if you want `--backend mlx`.
 
 **Windows (PowerShell)**
 
@@ -62,10 +65,34 @@ python whisper_benchmark.py --model large-v3 --runs 5
 python whisper_benchmark.py --json results.json
 ```
 
+### Apple Silicon (mlx-whisper)
+
+On Apple Silicon Macs you can also benchmark [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper),
+which runs on the GPU via Metal (note: the GPU, not the Neural Engine):
+
+```bash
+pip install mlx-whisper
+python whisper_benchmark.py --backend mlx
+```
+
+mlx-whisper's audio loading requires `ffmpeg` (e.g. `brew install ffmpeg`), which is not bundled.
+
+Short model names are mapped to the `mlx-community` conversions on Hugging
+Face (e.g. `large-v3` → `mlx-community/whisper-large-v3-mlx`); pass a full
+repo path to use a different conversion.
+
+**Comparability caveat:** mlx-whisper always uses greedy decoding (no beam
+search) and has no VAD filter, so `--beam-size`, `--no-vad`, `--device`,
+`--compute-type`, and `--cpu-threads` are ignored (with a warning). Language
+and the initial prompt match the faster-whisper settings, but mlx numbers are
+not settings-identical to the faster-whisper baseline — the JSON records
+`"backend"`, `"beam_size": null`, `"vad": false` so runs can't be confused.
+
 ### Key flags
 
 | Flag | Description |
 | --- | --- |
+| `--backend {faster-whisper,mlx}` | Inference engine. Default `faster-whisper`. `mlx` runs mlx-whisper on the Apple GPU (Metal); Apple Silicon only. |
 | `--audio PATH` | Path to audio file. Defaults to downloading a public-domain ~33s JFK speech sample. Use the same file across machines for a representative comparison. |
 | `--device {cpu,cuda,auto}` | Inference device. Default `cpu`. |
 | `--compute-type` | CTranslate2 compute type, e.g. `int8`, `int8_float16`, `float16`, `float32`. Default `int8`. |
