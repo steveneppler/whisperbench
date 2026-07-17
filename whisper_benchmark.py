@@ -38,6 +38,29 @@ VAD_PARAMS = dict(
     max_speech_duration_s=30,
 )
 
+# Short model names -> community MLX conversions (used by --backend mlx)
+MLX_MODEL_MAP = {
+    "tiny": "mlx-community/whisper-tiny-mlx",
+    "base": "mlx-community/whisper-base-mlx",
+    "small": "mlx-community/whisper-small-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
+    "large-v3": "mlx-community/whisper-large-v3-mlx",
+    "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
+}
+
+
+def resolve_mlx_model(name):
+    if "/" in name:
+        return name
+    try:
+        return MLX_MODEL_MAP[name]
+    except KeyError:
+        raise ValueError(
+            f"No MLX mapping for model '{name}'. Use one of: "
+            f"{', '.join(sorted(MLX_MODEL_MAP))}, or pass a full Hugging Face "
+            f"repo path (e.g. mlx-community/whisper-large-v3-mlx)."
+        ) from None
+
 # Public domain speech sample (~33s) used when no --audio is given
 SAMPLE_URL = "https://github.com/SYSTRAN/faster-whisper/raw/master/tests/data/jfk.flac"
 SAMPLE_PATH = Path("bench_sample.flac")
